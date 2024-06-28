@@ -17,35 +17,43 @@ from src.visualize import visualize_signals, plot_learning_curves
 from src.metrics import calculate_metrics
 
 def main():
-    # Set up logging and GPU/CPU configuration
+    # Set up logging
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+    logger = logging.getLogger(__name__)
+    logger.info("Starting the training script")
 
+    # GPU/CPU configuration
     physical_devices = tf.config.list_physical_devices('GPU')
     if physical_devices:
         tf.config.experimental.set_memory_growth(physical_devices[0], True)
         device = '/GPU:0'
-        logging.info("Using GPU for training")
+        logger.info("Using GPU for training")
     else:
         device = '/CPU:0'
-        logging.info("Using CPU for training")
+        logger.info("Using CPU for training")
 
     # Get Data
+    logger.info("Fetching stock data for AAPL")
     stock_data = fetch_stock_data('AAPL', '2019-06-20', '2024-06-21', 'AAPL_data.csv')
+    logger.info("Debugging raw stock data")
     debug_dataframe(stock_data, "Raw Stock Data", save_csv=True, output_file="raw_stock_data.csv")
 
     # Data Preprocessing
+    logger.info("Preprocessing stock data")
     preprocessed_data, scaler, optimal_features, stock_data = prepare_data('AAPL', '2019-06-20', '2024-06-21', n_select=15, debug=True)
+    logger.info(f"Selected {len(optimal_features)} optimal features")
 
     # Environment Setup
+    logger.info("Setting up the training environment")
     num_envs = 3
     file_path = 'preprocessed_data.csv'
     envs = gym.vector.SyncVectorEnv([lambda: make_env(file_path, number_of_days_to_consider=20, n_select=15) for _ in range(num_envs)])
 
-    # Verify the observation space
-    print(f"Observation space: {envs.single_observation_space}")
-    print(f"Action space: {envs.single_action_space}")
+    logger.info(f"Observation space: {envs.single_observation_space}")
+    logger.info(f"Action space: {envs.single_action_space}")
 
     # Agent Initialization
+    logger.info("Initializing agent ensemble")
     num_agents = 5
     learning_rate = 0.001
     discount_factor = 0.95
@@ -61,8 +69,9 @@ def main():
                              batch_size=32)
 
     # Training
+    logger.info("Starting training process")
     num_episodes = 10000
-    replay_frequency = 32  # Increased from 4 to 32
+    replay_frequency = 32
     reward_across_episodes = []
     epsilons_across_episodes = []
 
@@ -110,7 +119,7 @@ def main():
 
         mean_reward = np.mean(episode_rewards)
         reward_across_episodes.append(mean_reward)
-        epsilons_across_episodes.append(ensemble.agents[0].epsilon)  # Assuming all agents have the same epsilon
+        epsilons_across_episodes.append(ensemble.agents[0].epsilon)
 
         ensemble.decay_epsilon()
 
@@ -124,27 +133,32 @@ def main():
             else:
                 wait += 1
                 if wait >= patience:
-                    print(f"Early stopping triggered at episode {episode + 1}")
+                    logger.info(f"Early stopping triggered at episode {episode + 1}")
                     break
 
         if (episode + 1) % 100 == 0:
-            logging.info(f"Episode {episode + 1}/{num_episodes} - Mean Reward: {mean_reward} - Epsilon: {ensemble.agents[0].epsilon}")
+            logger.info(f"Episode {episode + 1}/{num_episodes} - Mean Reward: {mean_reward:.4f} - Epsilon: {ensemble.agents[0].epsilon:.4f}")
 
-    print(f"Training completed after {episode + 1} episodes")
+    logger.info(f"Training completed after {episode + 1} episodes")
 
-    # Eval
+    # Evaluation
+    logger.info("Starting evaluation on multiple episodes")
     total_reward_learned_policy = run_multiple_episodes(envs, ensemble, num_episodes=30)
+    logger.info(f"Average reward over 30 episodes: {total_reward_learned_policy:.4f}")
 
-    # Visualize
+    # Visualization
+    logger.info("Generating learning curves")
     plot_learning_curves(reward_across_episodes, epsilons_across_episodes)
     plot_training_progress(reward_across_episodes, epsilons_across_episodes, total_reward_learned_policy)
 
-    # Single Environment
+    # Single Environment Evaluation
+    logger.info("Evaluating on single environment")
     stock_trading_environment = StockTradingEnvironment('./preprocessed_data.csv', number_of_days_to_consider=30)
     stock_trading_environment.train = False
     total_reward = run_learned_policy(stock_trading_environment, ensemble, verbose=True)
-    print(f"Total reward on test environment: {total_reward}")
+    logger.info(f"Total reward on test environment: {total_reward:.4f}")
 
+    logger.info("Generating predictions for visualization")
     obs, _ = stock_trading_environment.reset()
     terminated, truncated = False, False
     predictions = []
@@ -153,18 +167,22 @@ def main():
         obs, reward, terminated, truncated, info = stock_trading_environment.step(action)
         predictions.append(action)
 
+    logger.info("Visualizing trading signals")
     visualize_signals(stock_data.iloc[-len(predictions):], np.array(predictions))
 
     # Performance Metrics
+    logger.info("Calculating performance metrics")
     y_true = stock_data['signal'].iloc[-len(predictions):].map({'buy': 0, 'sell': 1, 'none': 2}).values
     accuracy, precision, recall, f1 = calculate_metrics(y_true, predictions)
-    print(f"Accuracy: {accuracy:.4f}")
-    print(f"Precision: {precision:.4f}")
-    print(f"Recall: {recall:.4f}")
-    print(f"F1 Score: {f1:.4f}")
+    logger.info(f"Accuracy: {accuracy:.4f}")
+    logger.info(f"Precision: {precision:.4f}")
+    logger.info(f"Recall: {recall:.4f}")
+    logger.info(f"F1 Score: {f1:.4f}")
 
     # Save Ensemble
+    logger.info("Saving the trained ensemble")
     save_pickle(ensemble, 'aapl_ensemble_agent.pkl')
+    logger.info("Training script completed successfully")
 
 if __name__ == "__main__":
     main()
