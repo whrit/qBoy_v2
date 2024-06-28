@@ -1,0 +1,6 @@
+gym_trading_env==0.3.3
+gymnasium==0.29.1
+matplotlib==3.9.0
+numpy==2.0.0
+pandas==2.2.2
+ta==0.11.0
